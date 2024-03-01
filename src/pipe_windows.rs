@@ -93,6 +93,7 @@ impl Pipe {
                 }
             }
         }
+
         let handle = unsafe {
             CreateFileW(
                 u16_slice.as_ptr(),
@@ -106,7 +107,20 @@ impl Pipe {
         };
 
         if handle != INVALID_HANDLE_VALUE {
-            Ok(Handle::Arc(Arc::new(handle), HandleType::Client))
+            let mut mode = PIPE_NOWAIT;
+            let result = unsafe {
+                SetNamedPipeHandleState(
+                    handle,
+                    &mut mode,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            };
+            if result != 0 {
+                Ok(Handle::Arc(Arc::new(handle), HandleType::Client))
+            } else {
+                Err(io::Error::last_os_error())
+            }
         } else {
             Err(io::Error::last_os_error())
         }
@@ -161,9 +175,7 @@ impl std::io::Write for Pipe {
 
         // Try again if pipe is closed
         match result {
-            Ok(r) => {
-                return Ok(r);
-            }
+            Ok(r) => Ok(r),
             Err(e) if e.raw_os_error().unwrap() as u32 == ERROR_NO_DATA => {
                 self.handle = None;
                 self.init_writer()?;
