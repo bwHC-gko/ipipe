@@ -1,15 +1,15 @@
 use crate::Pipe;
-use std::{io::{Read, Write}, thread};
 use std::sync::{Arc, Mutex};
+use std::{
+    io::{Read, Write},
+    thread,
+};
 
 #[test]
-fn test_pipe() -> crate::Result<()>
-{
-    fn write_nums(pipe: &mut Pipe, max: i32) -> crate::Result<usize>
-    { 
+fn test_pipe() -> crate::Result<()> {
+    fn write_nums(pipe: &mut Pipe, max: i32) -> crate::Result<usize> {
         let mut written = 0;
-        for i in 1..=max
-        {
+        for i in 1..=max {
             written += pipe.write(&format!("{}\n", i).as_bytes())?;
         }
         written += pipe.write(&['X' as u8])?;
@@ -38,38 +38,31 @@ fn test_pipe() -> crate::Result<()>
     Ok(())
 }
 
-
 #[test]
-fn test_pipe_2() -> crate::Result<()>
-{
+fn test_pipe_2() -> crate::Result<()> {
     use std::io::{BufRead, BufWriter};
     let pipe = Pipe::create()?;
     let mut writer = BufWriter::new(pipe.clone());
-    thread::spawn(move || -> std::io::Result<()>
-        {
-            for i in 1..5
-            {
-                writeln!(&mut writer, "This is line #{}", i)?;
-            }
-            Ok(())
-        });
-    for (i, line) in std::io::BufReader::new(pipe).lines().enumerate()
-    {
+    thread::spawn(move || -> std::io::Result<()> {
+        for i in 1..5 {
+            writeln!(&mut writer, "This is line #{}", i)?;
+        }
+        Ok(())
+    });
+    for (i, line) in std::io::BufReader::new(pipe).lines().enumerate() {
         let line = line?;
         println!("{}", line);
         assert_eq!(format!("This is line #{}", i + 1), line);
-        if i == 3
-        {
+        if i == 3 {
             break;
         }
     }
     Ok(())
 }
 
-#[cfg(feature="static_pipe")]
+#[cfg(feature = "static_pipe")]
 #[test]
-fn test_static() -> Result<(), Box<dyn std::error::Error>>
-{
+fn test_static() -> Result<(), Box<dyn std::error::Error>> {
     const X: char = 'X';
     use crate::static_pipe;
 
@@ -89,19 +82,17 @@ fn test_static() -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-#[cfg(feature="static_pipe")]
+#[cfg(feature = "static_pipe")]
 #[test]
-fn test_write_first() -> Result<(), Box<dyn std::error::Error>>
-{
+fn test_write_first() -> Result<(), Box<dyn std::error::Error>> {
     const X: char = 'X';
     use crate::static_pipe;
 
     let mut reader = static_pipe::init("test_pipe2")?;
-    thread::spawn(move || 
-        {
-            pprintln!("test_pipe2", "This came through the pipe.").unwrap();
-            pprintln!("test_pipe2", "{}", X).unwrap();
-        });
+    thread::spawn(move || {
+        pprintln!("test_pipe2", "This came through the pipe.").unwrap();
+        pprintln!("test_pipe2", "{}", X).unwrap();
+    });
 
     let result = read_until_x(&mut reader)?;
     println!("String sent through the pipe: {:?}", result);
@@ -111,25 +102,24 @@ fn test_write_first() -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-fn read_until_x(pipe: &mut Pipe) -> std::io::Result<String>
-{
+fn read_until_x(pipe: &mut Pipe) -> std::io::Result<String> {
     let mut buf: [u8; 1] = [0];
     let mut container = String::new();
-    loop
-    {
-        match pipe.read(&mut buf)
-        {
+    loop {
+        match pipe.read(&mut buf) {
             Ok(_) if buf[0] != 'X' as u8 => container.push(buf[0] as char),
-            Ok(_) => { break Ok(container);  }
-            Err(e) => { break Err(e); }
+            Ok(_) => {
+                break Ok(container);
+            }
+            Err(e) => {
+                break Err(e);
+            }
         }
     }
 }
 
 #[test]
-fn test_name()
-{
+fn test_name() {
     let pipe = Pipe::with_name("test_name").unwrap();
     assert_eq!(pipe.name().unwrap(), "test_name");
 }
-
