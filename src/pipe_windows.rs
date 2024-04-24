@@ -245,10 +245,6 @@ impl std::io::Read for Pipe {
                 Err(e) => {
                     if let Some(_err) = e.raw_os_error() {
                         Err(std::io::Error::from(e))?;
-                        // if err as u32 != 109 {
-                        //     Err(std::io::Error::from(e))?;
-                        // }
-                        // continue;
                     }
                     break Ok(0);
                 }

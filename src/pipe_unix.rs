@@ -4,19 +4,22 @@ use nix::errno::Errno;
 use nix::sys::stat::{stat, Mode, SFlag};
 use nix::sys::termios::{tcflush, FlushArg};
 use nix::{fcntl, unistd};
+use std::fs::File;
+use std::os::fd::{AsFd, FromRawFd};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 
 #[cfg(feature = "rand")]
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use rand::distributions::Alphanumeric;
 
 /// Abstraction over a named pipe
+#[derive(Default)]
 pub struct Pipe {
-    handle1: Handle,
+    handle1: Option<Handle>,
     handle2: Option<Handle>,
     pub(super) path: PathBuf,
     pub(super) is_slave: bool,
-    delete: OnCleanup,
+    delete: Option<OnCleanup>,
 }
 
 impl Pipe {
@@ -44,11 +47,11 @@ impl Pipe {
             }
 
             Pipe::init_handle(path).map(|handle| Pipe {
-                handle1: handle,
+                handle1: Some(handle),
                 handle2: None,
                 path: path.to_path_buf(),
                 is_slave: false,
-                delete: on_cleanup,
+                delete: Some(on_cleanup),
             })
         } else {
             Err(Error::InvalidPath)
@@ -66,13 +69,12 @@ impl Pipe {
     #[cfg(feature = "rand")]
     pub fn create() -> Result<Self> {
         // Generate a random path name
+
+        use rand::distributions::DistString;
         let path = PathBuf::from(format!(
             "/tmp/pipe_{}_{}",
             std::process::id(),
-            thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(10)
-                .collect::<String>()
+            Alphanumeric.sample_string(&mut rand::thread_rng(), 15)
         ));
 
         Pipe::open(&path, OnCleanup::NoDelete)
@@ -80,7 +82,7 @@ impl Pipe {
 
     /// Close a named pipe
     pub fn close(self) -> Result<()> {
-        if let Some(raw) = self.handle1.raw() {
+        if let Some(raw) = self.handle1.as_ref().unwrap().raw() {
             unistd::close(raw).map_err(Error::from)
         } else {
             Ok(())
@@ -112,11 +114,11 @@ impl Pipe {
     }
 
     fn init_handle_type(&mut self, handle_type: HandleType) -> Result<std::os::unix::io::RawFd> {
-        if self.handle1.handle_type() == HandleType::Unknown {
-            self.handle1.set_type(handle_type);
+        if self.handle1.as_ref().unwrap().handle_type() == HandleType::Unknown {
+            self.handle1.as_mut().unwrap().set_type(handle_type);
         }
-        if self.handle1.handle_type() == handle_type {
-            self.handle1.raw()
+        if self.handle1.as_ref().unwrap().handle_type() == handle_type {
+            self.handle1.as_ref().unwrap().raw()
         } else {
             if let None = self.handle2 {
                 let mut handle = Pipe::init_handle(&self.path)?;
@@ -133,16 +135,19 @@ impl Pipe {
 impl std::io::Write for Pipe {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         let handle = self.init_handle_type(HandleType::Write)?;
-        unistd::write(handle, bytes)
+        unistd::write(unsafe { File::from_raw_fd(handle).as_fd() }, bytes)
             .map_err(Error::from)
             .map_err(std::io::Error::from)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
         let handle = self.init_handle_type(HandleType::Write)?;
-        tcflush(handle, FlushArg::TCOFLUSH)
-            .map_err(Error::from)
-            .map_err(std::io::Error::from)
+        tcflush(
+            unsafe { File::from_raw_fd(handle).as_fd() },
+            FlushArg::TCOFLUSH,
+        )
+        .map_err(Error::from)
+        .map_err(std::io::Error::from)
     }
 }
 
@@ -158,10 +163,12 @@ impl std::io::Read for Pipe {
 impl Drop for Pipe {
     fn drop(&mut self) {
         if !self.is_slave {
-            self.handle1 = Handle::Weak(Weak::new(), HandleType::Unknown);
+            self.handle1 = Some(Handle::Weak(Weak::new(), HandleType::Unknown));
             self.handle2 = None;
-            if let OnCleanup::Delete = self.delete {
-                std::fs::remove_file(&self.path).unwrap();
+            if let Some(del) = self.delete.as_ref() {
+                if let OnCleanup::Delete = del {
+                    std::fs::remove_file(&self.path).unwrap();
+                }
             }
         }
     }
@@ -176,7 +183,7 @@ impl Clone for Pipe {
             handle2: self.handle2.clone(),
             path: self.path.clone(),
             is_slave: true,
-            delete: OnCleanup::NoDelete,
+            delete: Some(OnCleanup::NoDelete),
         }
     }
 }
